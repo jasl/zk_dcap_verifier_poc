@@ -1,8 +1,7 @@
 mod quote;
 mod tcb_info;
 mod constants;
-// TODO: need port ring
-// mod utils;
+mod utils;
 
 use alloc::borrow::ToOwned;
 use alloc::string::{String, ToString};
@@ -13,8 +12,7 @@ use scale_info::TypeInfo;
 use crate::dcap::quote::{AuthData, EnclaveReport, Quote};
 use crate::dcap::tcb_info::TcbInfo;
 use crate::dcap::constants::*;
-// TODO: need port ring
-// use crate::dcap::utils::*;
+use crate::dcap::utils::*;
 use crate::Error;
 
 #[derive(Encode, Decode, TypeInfo, Clone, PartialEq, Eq, Debug)]
@@ -81,6 +79,32 @@ pub fn verify(
     // {
     //     return Err(Error::RsaSignatureIsInvalid);
     // }
+
+    use x509_verify::der::{Decode, Encode};
+    use x509_verify::x509_cert::Certificate;
+    use x509_verify::{Signature, VerifyInfo, VerifyingKey};
+
+    let leaf_certs = extract_raw_certs(quote_collateral.tcb_info_issuer_chain.as_bytes())?;
+    if leaf_certs.len() < 2 {
+        return Err(Error::CertificateChainIsTooShort);
+    }
+    let cert = Certificate::from_der(&leaf_certs[0]).unwrap();
+    let verify_info = VerifyInfo::new(
+        cert.tbs_certificate
+            .to_der()
+            .unwrap()
+            .into(),
+        Signature::new(
+            &cert.signature_algorithm,
+            quote_collateral.tcb_info.as_bytes(),
+        ),
+    );
+    let key: VerifyingKey = cert
+        .tbs_certificate
+        .subject_public_key_info
+        .try_into()
+        .unwrap();
+    key.verify(&verify_info).unwrap();
 
     // Check quote fields
     if quote.header.version != QUOTE_VERSION_V3 {

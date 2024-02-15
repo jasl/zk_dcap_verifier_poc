@@ -1,6 +1,6 @@
 // TODO: need port ring
 // use alloc::vec;
-// use alloc::vec::Vec;
+use alloc::vec::Vec;
 // use core::time::Duration;
 // use webpki::types::CertificateDer;
 // use x509_cert::Certificate;
@@ -10,7 +10,7 @@
 // };
 //
 // use crate::dcap::constants::*;
-// use crate::Error;
+use crate::Error;
 
 // pub fn get_intel_extension(der_encoded: &[u8]) -> Result<Vec<u8>, Error> {
 //     let cert: Certificate = der::Decode::from_der(der_encoded)
@@ -86,17 +86,17 @@
 //         _ => Err(Error::PceSvnLengthMismatch),
 //     }
 // }
-//
-// pub fn extract_raw_certs(cert_chain: &[u8]) -> Result<Vec<Vec<u8>>, Error> {
-//     Ok(
-//         pem::parse_many(cert_chain)
-//             .map_err(|_| Error::CodecError)?
-//             .iter()
-//             .map(|i| i.contents().to_vec() )
-//             .collect()
-//     )
-// }
-//
+
+pub fn extract_raw_certs(cert_chain: &[u8]) -> Result<Vec<Vec<u8>>, Error> {
+    Ok(
+        pem::parse_many(cert_chain)
+            .map_err(|_| Error::CodecError)?
+            .iter()
+            .map(|i| i.contents().to_vec() )
+            .collect()
+    )
+}
+
 // pub fn extract_certs<'a>(cert_chain: &'a [u8]) -> Result<Vec<CertificateDer<'a>>, Error> {
 //     let mut certs = Vec::<CertificateDer<'a>>::new();
 //
