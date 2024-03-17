@@ -101,10 +101,7 @@ fn main() {
 
     println!("Receipt size: {} bytes", encoded_receipt.len());
     // println!("Receipt: {}", hex::encode(&encoded_receipt));
-    // std::fs::write(
-    //     "receipt",
-    //     &encoded_receipt
-    // ).unwrap();
+    std::fs::write("tmp/receipt", &encoded_receipt).unwrap();
 
     let decoded_receipt: Receipt = ciborium::de::from_reader(&encoded_receipt[..]).unwrap();
     decoded_receipt
