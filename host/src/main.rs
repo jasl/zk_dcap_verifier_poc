@@ -3,7 +3,12 @@
 use methods::{
     GUEST_FOR_ZK_DCAP_VERIFIER_ELF, GUEST_FOR_ZK_DCAP_VERIFIER_ID
 };
-use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
+use risc0_zkvm::{
+    get_prover_server,
+    recursion::identity_p254,
+    CompactReceipt, ExecutorEnv, ExecutorImpl, InnerReceipt, ProverOpts, Receipt, VerifierContext,
+};
+use risc0_groth16::docker::stark_to_snark;
 
 use std::time::SystemTime;
 use chrono::{DateTime, Utc};
@@ -43,8 +48,13 @@ fn main() {
         .build()
         .unwrap();
 
+    let mut exec = ExecutorImpl::from_elf(env, GUEST_FOR_ZK_DCAP_VERIFIER_ELF).unwrap();
+    let session = exec.run().unwrap();
+
     // Obtain the default prover.
-    let prover = default_prover();
+    let opts = ProverOpts::default();
+    let ctx = VerifierContext::default();
+    let prover = get_prover_server(&opts).unwrap();
 
     let current_time = SystemTime::now();
     let current_time = DateTime::<Utc>::from(current_time);
@@ -52,19 +62,15 @@ fn main() {
     println!{"Started at {}", current_time_str};
 
     // Produce a receipt by proving the specified ELF binary.
-    let receipt = prover
-        .prove(env, GUEST_FOR_ZK_DCAP_VERIFIER_ELF)
-        .unwrap();
+    let receipt = prover.prove_session(&ctx, &session).unwrap();
+    let journal = session.journal.unwrap();
 
     let current_time = SystemTime::now();
     let current_time = DateTime::<Utc>::from(current_time);
     let current_time_str = current_time.format("%Y-%m-%d %H:%M:%S.%f").to_string();
     println!{"Finished at {}", current_time_str};
 
-    // TODO: Implement code for retrieving receipt journal here.
-
-    // For example:
-    let output: Outputs = receipt.journal.decode().unwrap();
+    let output: Outputs = journal.decode().unwrap();
     println!("Report data: {}", hex::encode(&output.report_data));
     println!("MR Enclave: {}", hex::encode(&output.mr_enclave));
     println!("MR Signer: {}", hex::encode(&output.mr_signer));
@@ -73,11 +79,22 @@ fn main() {
     println!("TCB status: {}", output.tcb_status);
     println!("Advisory IDs: {}", output.advisory_ids.join(", "));
 
-    // The receipt was verified at the end of proving, but the below code is an
-    // example of how someone else could verify this receipt.
-    // receipt
-    //     .verify(GUEST_FOR_ZK_DCAP_VERIFIER_ID)
-    //     .unwrap();
+    let claim = receipt.get_claim().unwrap();
+    let composite_receipt = receipt.inner.composite().unwrap();
+    let succinct_receipt = prover.compress(composite_receipt).unwrap();
+    let journal = journal.bytes;
+
+    let ident_receipt = identity_p254(&succinct_receipt).unwrap();
+    let seal_bytes = ident_receipt.get_seal_bytes();
+
+    let seal = stark_to_snark(&seal_bytes).unwrap().to_vec();
+
+    let receipt = Receipt::new(
+        InnerReceipt::Compact(CompactReceipt { seal, claim }),
+        journal,
+    );
+
+    receipt.verify(GUEST_FOR_ZK_DCAP_VERIFIER_ID).unwrap();
 
     let mut encoded_receipt = Vec::new();
     ciborium::ser::into_writer(&receipt, &mut encoded_receipt).unwrap();
