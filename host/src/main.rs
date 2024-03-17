@@ -59,7 +59,7 @@ fn main() {
     let current_time = SystemTime::now();
     let current_time = DateTime::<Utc>::from(current_time);
     let current_time_str = current_time.format("%Y-%m-%d %H:%M:%S.%f").to_string();
-    println!{"Started at {}", current_time_str};
+    println!{"Prove started at {}", current_time_str};
 
     // Produce a receipt by proving the specified ELF binary.
     let receipt = prover.prove_session(&ctx, &session).unwrap();
@@ -68,9 +68,10 @@ fn main() {
     let current_time = SystemTime::now();
     let current_time = DateTime::<Utc>::from(current_time);
     let current_time_str = current_time.format("%Y-%m-%d %H:%M:%S.%f").to_string();
-    println!{"Finished at {}", current_time_str};
+    println!{"Prove finished at {}", current_time_str};
 
     let output: Outputs = journal.decode().unwrap();
+    println!();
     println!("Report data: {}", hex::encode(&output.report_data));
     println!("MR Enclave: {}", hex::encode(&output.mr_enclave));
     println!("MR Signer: {}", hex::encode(&output.mr_signer));
@@ -78,8 +79,10 @@ fn main() {
     println!("ISV SVN: {}", output.isv_svn);
     println!("TCB status: {}", output.tcb_status);
     println!("Advisory IDs: {}", output.advisory_ids.join(", "));
+    println!();
 
     let claim = receipt.get_claim().unwrap();
+    // Will panic when `RISC0_DEV_MODE=1`
     let composite_receipt = receipt.inner.composite().unwrap();
     let succinct_receipt = prover.compress(composite_receipt).unwrap();
     let journal = journal.bytes;
@@ -87,7 +90,18 @@ fn main() {
     let ident_receipt = identity_p254(&succinct_receipt).unwrap();
     let seal_bytes = ident_receipt.get_seal_bytes();
 
+    let current_time = SystemTime::now();
+    let current_time = DateTime::<Utc>::from(current_time);
+    let current_time_str = current_time.format("%Y-%m-%d %H:%M:%S.%f").to_string();
+    println!{"Stark-to-Snark started at {}", current_time_str};
+
+    // Only support x86
     let seal = stark_to_snark(&seal_bytes).unwrap().to_vec();
+
+    let current_time = SystemTime::now();
+    let current_time = DateTime::<Utc>::from(current_time);
+    let current_time_str = current_time.format("%Y-%m-%d %H:%M:%S.%f").to_string();
+    println!{"Stark-to-Snark finished at {}", current_time_str};
 
     let receipt = Receipt::new(
         InnerReceipt::Compact(CompactReceipt { seal, claim }),
