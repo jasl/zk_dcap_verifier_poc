@@ -4,9 +4,9 @@ use methods::{
     GUEST_FOR_ZK_DCAP_VERIFIER_ELF, GUEST_FOR_ZK_DCAP_VERIFIER_ID
 };
 use risc0_zkvm::{
-    get_prover_server,
+    get_prover_server, default_prover,
     recursion::identity_p254,
-    CompactReceipt, ExecutorEnv, ExecutorImpl, InnerReceipt, ProverOpts, Receipt, VerifierContext,
+    CompactReceipt, ExecutorEnv, InnerReceipt, ProverOpts, Receipt,
 };
 use risc0_groth16::docker::stark_to_snark;
 
@@ -14,23 +14,18 @@ use std::time::SystemTime;
 use chrono::{DateTime, Utc};
 use primitive_io::{Inputs, Outputs};
 
+fn print_current_time(tag: &str) {
+    let current_time = SystemTime::now();
+    let current_time = DateTime::<Utc>::from(current_time);
+    let current_time_str = current_time.format("%Y-%m-%d %H:%M:%S.%f").to_string();
+    println!{"{} at {}", tag, current_time_str};
+}
+
 fn main() {
     // Initialize tracing. In order to view logs, run `RUST_LOG=info cargo run`
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::filter::EnvFilter::from_default_env())
         .init();
-
-    // An executor environment describes the configurations for the zkVM
-    // including program inputs.
-    // An default ExecutorEnv can be created like so:
-    // `let env = ExecutorEnv::builder().build().unwrap();`
-    // However, this `env` does not have any inputs.
-    //
-    // To add add guest input to the executor environment, use
-    // ExecutorEnvBuilder::write().
-    // To access this method, you'll need to use ExecutorEnv::builder(), which
-    // creates an ExecutorEnvBuilder. When you're done adding input, call
-    // ExecutorEnvBuilder::build().
 
     // Mock data
     let now = 1699301000u64;
@@ -48,29 +43,19 @@ fn main() {
         .build()
         .unwrap();
 
-    let mut exec = ExecutorImpl::from_elf(env, GUEST_FOR_ZK_DCAP_VERIFIER_ELF).unwrap();
-    let session = exec.run().unwrap();
-
     // Obtain the default prover.
-    let opts = ProverOpts::default();
-    let ctx = VerifierContext::default();
-    let prover = get_prover_server(&opts).unwrap();
+    let prover = default_prover();
 
-    let current_time = SystemTime::now();
-    let current_time = DateTime::<Utc>::from(current_time);
-    let current_time_str = current_time.format("%Y-%m-%d %H:%M:%S.%f").to_string();
-    println!{"Prove started at {}", current_time_str};
+    print_current_time("Prove started");
 
     // Produce a receipt by proving the specified ELF binary.
-    let receipt = prover.prove_session(&ctx, &session).unwrap();
-    let journal = session.journal.unwrap();
+    let receipt = prover
+        .prove(env, GUEST_FOR_ZK_DCAP_VERIFIER_ELF)
+        .unwrap();
 
-    let current_time = SystemTime::now();
-    let current_time = DateTime::<Utc>::from(current_time);
-    let current_time_str = current_time.format("%Y-%m-%d %H:%M:%S.%f").to_string();
-    println!{"Prove finished at {}", current_time_str};
+    print_current_time("Prove finished");
 
-    let output: Outputs = journal.decode().unwrap();
+    let output: Outputs = receipt.journal.decode().unwrap();
     println!();
     println!("Report data: {}", hex::encode(&output.report_data));
     println!("MR Enclave: {}", hex::encode(&output.mr_enclave));
@@ -81,27 +66,37 @@ fn main() {
     println!("Advisory IDs: {}", output.advisory_ids.join(", "));
     println!();
 
-    let claim = receipt.get_claim().unwrap();
+    // Simulate dump the receipt
+    let mut encoded_receipt = Vec::new();
+    ciborium::ser::into_writer(&receipt, &mut encoded_receipt).unwrap();
+
+    // https://github.com/risc0/risc0/tree/main/risc0/groth16
+
+    // Obtain a prover.
+    let opts = ProverOpts::default();
+    let prover = get_prover_server(&opts).unwrap();
+
+    // Simulate load the dumped receipt
+    let decoded_receipt: Receipt = ciborium::de::from_reader(&encoded_receipt[..]).unwrap();
+    decoded_receipt
+        .verify(GUEST_FOR_ZK_DCAP_VERIFIER_ID)
+        .unwrap();
+
+    let claim = decoded_receipt.get_claim().unwrap();
     // Will panic when `RISC0_DEV_MODE=1`
-    let composite_receipt = receipt.inner.composite().unwrap();
+    let composite_receipt = decoded_receipt.inner.composite().unwrap();
     let succinct_receipt = prover.compress(composite_receipt).unwrap();
-    let journal = journal.bytes;
+    let journal = decoded_receipt.journal.bytes;
 
     let ident_receipt = identity_p254(&succinct_receipt).unwrap();
     let seal_bytes = ident_receipt.get_seal_bytes();
 
-    let current_time = SystemTime::now();
-    let current_time = DateTime::<Utc>::from(current_time);
-    let current_time_str = current_time.format("%Y-%m-%d %H:%M:%S.%f").to_string();
-    println!{"Stark-to-Snark started at {}", current_time_str};
+    print_current_time("Stark-to-Snark started");
 
     // Only support x86
     let seal = stark_to_snark(&seal_bytes).unwrap().to_vec();
 
-    let current_time = SystemTime::now();
-    let current_time = DateTime::<Utc>::from(current_time);
-    let current_time_str = current_time.format("%Y-%m-%d %H:%M:%S.%f").to_string();
-    println!{"Stark-to-Snark finished at {}", current_time_str};
+    print_current_time("Stark-to-Snark finished");
 
     let receipt = Receipt::new(
         InnerReceipt::Compact(CompactReceipt { seal, claim }),
@@ -110,6 +105,7 @@ fn main() {
 
     receipt.verify(GUEST_FOR_ZK_DCAP_VERIFIER_ID).unwrap();
 
+    // Simulate dump the receipt
     let mut encoded_receipt = Vec::new();
     ciborium::ser::into_writer(&receipt, &mut encoded_receipt).unwrap();
 
@@ -117,6 +113,7 @@ fn main() {
     // println!("Receipt: {}", hex::encode(&encoded_receipt));
     std::fs::write("tmp/receipt", &encoded_receipt).unwrap();
 
+    // Simulate load the dumped receipt
     let decoded_receipt: Receipt = ciborium::de::from_reader(&encoded_receipt[..]).unwrap();
     decoded_receipt
         .verify(GUEST_FOR_ZK_DCAP_VERIFIER_ID)
